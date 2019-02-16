@@ -1,0 +1,23 @@
+{
+  "name": "Guest Room",
+  "device_id": "GuestRoom",
+  "device_stats_interval": 180,  
+  "wifi": {
+    "ssid": "<WIFI-SSID>",
+    "password": "<WIFI PASSWORD>"
+  },
+  "mqtt": {
+    "host": "<MQTT-SERVER-IP>",
+    "port": 1883,
+	"base_topic": "homie/",
+    "auth": true,
+    "username": "<MQTT-USERNAME>",
+    "password": "<MQTT-USERPASS>"
+  },
+  "ota": {
+    "enabled": true
+  },
+  "settings": {
+      "sensorsInterval": 300
+  }
+}
