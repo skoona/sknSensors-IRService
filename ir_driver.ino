@@ -10,21 +10,12 @@
 
 
 // Configuration parameters
-// GPIO the IR LED is connected to/controlled by. GPIO 4 = D2.
-#define IR_Tx_PIN 2  // <=- CHANGE_ME (optional)
-// define IR_Tx_PIN 3  // For an ESP-01 we suggest you use RX/GPIO3/Pin 7.
-//
-// GPIO the IR RX module is connected to/controlled by. GPIO 14 = D5.
-// Comment this out to disable receiving/decoding IR messages entirely.
-#define IR_Rx_PIN 14  // <=- CHANGE_ME (optional)
-#define IR_Rx_PIN_PULLUP true
 
 #define REPORT_UNKNOWNS     true  // Report inbound IR messages that we don't know.
 #define REPORT_RAW_UNKNOWNS true  // Report the whole buffer, recommended:
 
 // Let's use a larger than normal buffer so we can handle AirCon remote codes.
 const uint16_t kCaptureBufferSize = 1024;
-
 
 // Ignore unknown messages with <10 pulses (see also REPORT_UNKNOWNS)
 const uint16_t kMinUnknownSize = 2 * 10;
@@ -38,36 +29,18 @@ const uint8_t kCaptureTimeout = 16;  // Milliseconds
 uint64_t getUInt64fromHex(char const *str);
 bool sendIRCode(int const ir_type, uint64_t const code, char const * code_str, uint16_t bits, uint16_t repeat);
 
-IRsend irsend = IRsend(IR_Tx_PIN);
-IRrecv irrecv(IR_Rx_PIN, kCaptureBufferSize, kCaptureTimeout, true);
+IRsend irsend = IRsend(IR_SEND_PIN);
+IRrecv irrecv(IR_RECEIVE_PIN, kCaptureBufferSize, kCaptureTimeout, true);
 decode_results capture;  // Somewhere to store inbound IR messages.
 
-uint16_t *codeArray;
-bool     boot = true;
-bool     ir_lock = false;  // Primitive locking for gating the IR LED.
-uint32_t sendReqCounter = 0;
-bool     lastSendSucceeded = false;  // Store the success status of the last send.
-uint32_t lastSendTime = 0;
-int8_t   offset;  // The calculated period offset for this chip and library.
+bool    ir_lock        = false;  // Primitive locking for gating the IR LED.
+String  lastIrReceived = "None";
 
-String   lastMqttCmd = "None";
-uint32_t lastMqttCmdTime = 0;
-uint32_t lastConnectedTime = 0;
-uint32_t lastDisconnectedTime = 0;
-uint32_t mqttDisconnectCounter = 0;
-bool     wasConnected = true;
-String   lastIrReceived = "None";
-uint32_t lastIrReceivedTime = 0;
-uint32_t irRecvCounter = 0;
 
 // Debug messages get sent to the serial port.
 void debug(String str) {
-#if DEBUG
-  uint32_t now = millis();
-  Serial.printf("%07u.%03u: %s\n", now / 1000, now % 1000, str.c_str());
-#endif  // DEBUG
+  Homie.getLogger() << "IR Service: " << str << endl;
 }
-
 
 // Count how many values are in the String.
 // Args:
@@ -100,9 +73,7 @@ uint16_t * newCodeArray(const uint16_t size) {
                   size * sizeof(uint16_t), ESP.getFreeHeap());
     Serial.println("Giving up & forcing a reboot.");
     
-// ---------------------------------------------
-    ESP.restart();  // Reboot.
-// ---------------------------------------------
+    Homie.reset();  // Reboot.
 
     delay(500);  // Wait for the restart to happen.
     return result;  // Should never get here, but just in case.
@@ -260,57 +231,51 @@ bool parseStringAndSendRaw(const String str) {
 }
 
 
-void ir_setup(void) {
+void irDriverSetup(void) {
   irsend.begin();
-  offset = irsend.calibrate();
-  pinMode(IR_Rx_PIN, INPUT_PULLUP);
+  irsend.calibrate();
+  pinMode(IR_RECEIVE_PIN, INPUT_PULLUP);
 
   // Ignore messages with less than minimum on or off pulses.
   irrecv.setUnknownThreshold(kMinUnknownSize);
   irrecv.enableIRIn();  // Start the receiver
 
-  pinMode(IR_Tx_PIN, OUTPUT); //IR TX pin as output
-  digitalWrite(IR_Tx_PIN, LOW); //turn off IR output initially
-
-  // Use SERIAL_TX_ONLY so that the RX pin can be freed up for GPIO/IR use.
-//  Serial.begin(BAUD_RATE, SERIAL_8N1, SERIAL_TX_ONLY);
+  pinMode(IR_SEND_PIN, OUTPUT); //IR TX pin as output
+  digitalWrite(IR_SEND_PIN, LOW); //turn off IR output initially
 
 }
 
-
-void ir_loop(void) {
-
-  uint32_t now = millis();
+// Listen and decode detected IR messages
+void irDriverLoop(void) {
 
   // Check if an IR code has been received via the IR RX module.
   if (irrecv.decode(&capture)) {
-    lastIrReceivedTime = millis();
-    lastIrReceived = String(capture.decode_type) + "," +
-        resultToHexidecimal(&capture);
+    uint32_t usecs = 0;
+    
+    gsReceiverString = String(capture.decode_type) + "," + resultToHexidecimal(&capture);
     if (capture.decode_type == UNKNOWN) {
-      lastIrReceived += ";";
-      for (uint16_t i = 1; i < capture.rawlen; i++) {
-        uint32_t usecs;
-        for (usecs = capture.rawbuf[i] * kRawTick; usecs > UINT16_MAX;
-             usecs -= UINT16_MAX) {
-          lastIrReceived += uint64ToString(UINT16_MAX);
-          lastIrReceived += ",0,";
+      gsReceiverString += ";";
+      for (uint16_t i = 1; i < capture.rawlen; i++) {        
+        usecs = 0;
+        for (usecs = capture.rawbuf[i] * kRawTick; usecs > UINT16_MAX; usecs -= UINT16_MAX) {
+          gsReceiverString += uint64ToString(UINT16_MAX);
+          gsReceiverString += ",0,";
         }
-        lastIrReceived += uint64ToString(usecs, 10);
-        if (i < capture.rawlen - 1)
-          lastIrReceived += ",";
+        gsReceiverString += uint64ToString(usecs, 10);
+        if (i < capture.rawlen - 1) {
+          gsReceiverString += ",";
+        }
       }
     }
-    // If it isn't an AC code, add the bits.
-    if (!hasACState(capture.decode_type))
-      lastIrReceived += "," + String(capture.bits);
-// ------------      
-//    mqtt_client.publish(MQTTrecv, lastIrReceived.c_str());
 
-    irRecvCounter++;
-    debug("Incoming IR message sent to MQTT: " + lastIrReceived);
+    // If it isn't an AC code, add the bits.
+    if (!hasACState(capture.decode_type)) {
+      gsReceiverString += "," + String(capture.bits);
+    }
+    
+    irServiceNode.setProperty("received").send(gsReceiverString);
+    debug("Listener Received: " + gsReceiverString);
   }
-  delay(100);
 }
 
 // Arduino framework doesn't support strtoull(), so make our own one.
@@ -346,6 +311,7 @@ uint64_t getUInt64fromHex(char const *str) {
 //   bool: Successfully sent or not.
 bool sendIRCode(int const ir_type, uint64_t const code, char const * code_str,
                 uint16_t bits, uint16_t repeat) {
+
   // Create a pseudo-lock so we don't try to send two codes at the same time.
   while (ir_lock)
     delay(20);
@@ -515,13 +481,12 @@ bool sendIRCode(int const ir_type, uint64_t const code, char const * code_str,
       // If we got here, we didn't know how to send it.
       success = false;
   }
-  lastSendTime = millis();
+
   // Release the lock.
   ir_lock = false;
 
   // Indicate that we sent the message or not.
   if (success) {
-    sendReqCounter++;
     debug("Sent the IR message:");
   } else {
     debug("Failed to send IR Message:");
@@ -538,46 +503,39 @@ bool sendIRCode(int const ir_type, uint64_t const code, char const * code_str,
     // Confirm what we were asked to send was sent.
     if (success) {
       if (ir_type == PRONTO && repeat > 0) {
-  // ----------------------------
-  //        mqtt_client.publish(MQTTack, (String(ir_type) + ",R" + String(repeat) + "," + String(code_str)).c_str());
+        gsCommandString = String(ir_type) + ",R" + String(repeat) + "," + String(code_str);
       } else {
-  // ----------------------------
-  //        mqtt_client.publish(MQTTack, (String(ir_type) + "," + String(code_str)).c_str());
-  // ----------------------------
+        gsCommandString = String(ir_type) + "," + String(code_str);
       }
     }
   } else {  // For "short" codes, we break it down a bit more before we report.
     debug("Code: 0x" + uint64ToString(code, 16));
     debug("Bits: " + String(bits));
     debug("Repeats: " + String(repeat));
-  // ----------------------------
-  //    if (success)
-  //      mqtt_client.publish(MQTTack, (String(ir_type) + "," + uint64ToString(code, 16) + "," + String(bits) + "," +  String(repeat)).c_str());
-  // ----------------------------
+    if (success) {
+      gsCommandString = String(ir_type) + "," + uint64ToString(code, 16) + "," + String(bits) + "," +  String(repeat);
+    }
   }
   return success;
 }
 
 
-
-bool processSetCommand(String const topic_name, String const callback_str) {
+/**
+ * Decode and send the received IR Codes
+ */
+bool processCommand(String const commandString) {
   char* tok_ptr;
   uint64_t code = 0;
   uint16_t nbits = 0;
   uint16_t repeat = 0;
 
-  debug("Receiving data by MQTT topic " + topic_name);
-
   // Make a copy of the callback string as strtok destroys it.
-  char* callback_c_str = strdup(callback_str.c_str());
-  debug("MQTT Payload (raw): " + callback_str);
-  // Save the message as the last command seen (global).
-  lastMqttCmd = callback_str;
-  lastMqttCmdTime = millis();
+  char* callback_c_str = strdup(commandString.c_str());
 
   // Get the numeric protocol type.
   int ir_type = strtoul(strtok_r(callback_c_str, ",", &tok_ptr), NULL, 10);
   char* next = strtok_r(NULL, ",", &tok_ptr);
+
   // If there is unparsed string left, try to convert it assuming it's hex.
   if (next != NULL) {
     code = getUInt64fromHex(next);
@@ -586,44 +544,19 @@ bool processSetCommand(String const topic_name, String const callback_str) {
     // We require at least two value in the string. Give up.
     return false;
   }
+  
   // If there is still string left, assume it is the bit size.
   if (next != NULL) {
     nbits = atoi(next);
     next = strtok_r(NULL, ",", &tok_ptr);
   }
+  
   // If there is still string left, assume it is the repeat count.
   if (next != NULL)
     repeat = atoi(next);
 
   free(callback_c_str);
 
-
-  // send received MQTT value by IR signal
-  lastSendSucceeded = sendIRCode(
-      ir_type, code,
-      callback_str.substring(callback_str.indexOf(",") + 1).c_str(),
-      nbits, repeat);
-}
-
-// Callback function, when the gateway receive an MQTT value on the topics
-// subscribed this function is called
-void callback(char* topic, byte* payload, unsigned int length) {
-  // In order to republish this payload, a copy must be made
-  // as the orignal payload buffer will be overwritten whilst
-  // constructing the PUBLISH packet.
-  // Allocate the correct amount of memory for the payload copy
-  byte* payload_copy = reinterpret_cast<byte*>(malloc(length + 1));
-  // Copy the payload to the new buffer
-  memcpy(payload_copy, payload, length);
-
-  // Conversion to a printable string
-  payload_copy[length] = '\0';
-  String callback_string = String(reinterpret_cast<char*>(payload_copy));
-  String topic_name = String(reinterpret_cast<char*>(topic));
-
-  // launch the function to treat received data
-  processSetCommand(topic_name, callback_string);
-
-  // Free the memory
-  free(payload_copy);
+  // send received value by IR signal
+  return sendIRCode(ir_type, code, commandString.substring(commandString.indexOf(",") + 1).c_str(), nbits, repeat);
 }
