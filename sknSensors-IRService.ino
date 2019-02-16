@@ -5,7 +5,7 @@
  *  Date:  02/16/2019
  *  
  *  Description: 
- *  - Broadcast IR Commands as received over command property and echo processed command-string back on receiver property
+ *  - Broadcast IR Commands as received over command property and echo processed command-string back on received property
  *  
  *  On 'command/set' 
  *    process IR command <string-command>
@@ -35,7 +35,7 @@ extern "C" {
 
 #define NODE_SENSOR_INTERVAL_MS     250
 #define NODE_SENSOR_INTERVAL_MIN_MS 99
-#define NODE_SENSOR_INTERVAL_MIN_MS 1000
+#define NODE_SENSOR_INTERVAL_MAX_MS 1000
 
 #define FW_NAME "sknSensors-IRService"
 #define FW_VERSION  "0.0.5"
@@ -43,13 +43,13 @@ extern "C" {
 #define IR_SEND_PIN    D6      // GPIO12
 #define IR_RCV_PIN     D6      // GPIO12
 #define IR_DECODER_PIN D6      // GPIO12
-
+ 
 String  gsCommandString   = "";
 String  gsReceiverString  = "";
 String  gsDecoderString   = "";
 
 // HomieNode(const char* id, const char* name, const char* type, bool range = false, uint16_t lower = 0, uint16_t upper = 0, const HomieInternals::NodeInputHandler& nodeInputHandler = [](const HomieRange& range, const String& property, const String& value) { return false; });
-HomieNode irServiceNode("service",    NODE_SERVICE_NAME,  "switch");
+HomieNode irServiceNode("irservice",    NODE_SERVICE_NAME,  "theater-remote");
 
 HomieSetting<long> sensorsIntervalSetting("sensorsInterval", "The interval in seconds to wait between sending commands.");
 
@@ -73,8 +73,8 @@ void setupHandler() {
 }
 
 void loopHandler() {
-// irReceiverNode
-// irDecoderNode
+// irServiceNode
+// irServiceNode
 }
 
 
@@ -103,17 +103,17 @@ void setup() {
   irServiceNode.advertise("command").setName(NODE_SERVICE_NAME)
                               .settable(commandHandler)
                               .setDatatype("string")
-                              .setRetainable(false)
+                              .setRetained(false)
                               .setUnit("%s");
 
   irServiceNode.advertise("received").setName(NODE_LISTENER_NAME)
                                      .setDatatype("string")
-                                     .setRetainable(true)
+                                     .setRetained(true)
                                      .setUnit("%s");
 
   irServiceNode.advertise("decoded").setName(NODE_DECODER_NAME)
                                   .setDatatype("string")
-                                  .setRetainable(true)
+                                  .setRetained(true)
                                   .setUnit("%s");  
   Homie.setup();
 }
