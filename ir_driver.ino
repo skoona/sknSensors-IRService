@@ -33,9 +33,7 @@ IRsend irsend = IRsend(IR_SEND_PIN);
 IRrecv irrecv(IR_RECEIVE_PIN, kCaptureBufferSize, kCaptureTimeout, true);
 decode_results capture;  // Somewhere to store inbound IR messages.
 
-bool    ir_lock        = false;  // Primitive locking for gating the IR LED.
-String  lastIrReceived = "None";
-
+volatile bool    ir_lock        = false;  // Primitive locking for gating the IR LED.
 
 // Debug messages get sent to the serial port.
 void debug(String str) {
@@ -228,54 +226,6 @@ bool parseStringAndSendRaw(const String str) {
   if (count > 0)
     return true;  // We sent something.
   return false;  // We probably didn't.
-}
-
-
-void irDriverSetup(void) {
-  irsend.begin();
-  irsend.calibrate();
-  pinMode(IR_RECEIVE_PIN, INPUT_PULLUP);
-
-  // Ignore messages with less than minimum on or off pulses.
-  irrecv.setUnknownThreshold(kMinUnknownSize);
-  irrecv.enableIRIn();  // Start the receiver
-
-  pinMode(IR_SEND_PIN, OUTPUT); //IR TX pin as output
-  digitalWrite(IR_SEND_PIN, LOW); //turn off IR output initially
-
-}
-
-// Listen and decode detected IR messages
-void irDriverLoop(void) {
-
-  // Check if an IR code has been received via the IR RX module.
-  if (irrecv.decode(&capture)) {
-    uint32_t usecs = 0;
-    
-    gsReceiverString = String(capture.decode_type) + "," + resultToHexidecimal(&capture);
-    if (capture.decode_type == UNKNOWN) {
-      gsReceiverString += ";";
-      for (uint16_t i = 1; i < capture.rawlen; i++) {        
-        usecs = 0;
-        for (usecs = capture.rawbuf[i] * kRawTick; usecs > UINT16_MAX; usecs -= UINT16_MAX) {
-          gsReceiverString += uint64ToString(UINT16_MAX);
-          gsReceiverString += ",0,";
-        }
-        gsReceiverString += uint64ToString(usecs, 10);
-        if (i < capture.rawlen - 1) {
-          gsReceiverString += ",";
-        }
-      }
-    }
-
-    // If it isn't an AC code, add the bits.
-    if (!hasACState(capture.decode_type)) {
-      gsReceiverString += "," + String(capture.bits);
-    }
-    
-    irServiceNode.setProperty("received").send(gsReceiverString);
-    debug("Listener Received: " + gsReceiverString);
-  }
 }
 
 // Arduino framework doesn't support strtoull(), so make our own one.
@@ -523,7 +473,7 @@ bool sendIRCode(int const ir_type, uint64_t const code, char const * code_str,
 /**
  * Decode and send the received IR Codes
  */
-bool processCommand(String const commandString) {
+bool irProcessCommand(String const commandString) {
   char* tok_ptr;
   uint64_t code = 0;
   uint16_t nbits = 0;
@@ -559,4 +509,56 @@ bool processCommand(String const commandString) {
 
   // send received value by IR signal
   return sendIRCode(ir_type, code, commandString.substring(commandString.indexOf(",") + 1).c_str(), nbits, repeat);
+}
+
+/**
+ * Initialize IR Driver Resources
+ */
+void irDriverSetup(void) {
+  irsend.begin();
+  irsend.calibrate();
+  pinMode(IR_RECEIVE_PIN, INPUT_PULLUP);
+
+  // Ignore messages with less than minimum on or off pulses.
+  irrecv.setUnknownThreshold(kMinUnknownSize);
+  irrecv.enableIRIn();  // Start the receiver
+
+  pinMode(IR_SEND_PIN, OUTPUT); //IR TX pin as output
+  digitalWrite(IR_SEND_PIN, LOW); //turn off IR output initially
+
+}
+
+/** 
+ * Listen and decode detected IR messages 
+ */
+void irListenerLoop(void) {
+
+  // Check if an IR code has been received via the IR RX module.
+  if (irrecv.decode(&capture)) {
+    uint32_t usecs = 0;
+    
+    gsReceiverString = String(capture.decode_type) + "," + resultToHexidecimal(&capture);
+    if (capture.decode_type == UNKNOWN) {
+      gsReceiverString += ";";
+      for (uint16_t i = 1; i < capture.rawlen; i++) {        
+        usecs = 0;
+        for (usecs = capture.rawbuf[i] * kRawTick; usecs > UINT16_MAX; usecs -= UINT16_MAX) {
+          gsReceiverString += uint64ToString(UINT16_MAX);
+          gsReceiverString += ",0,";
+        }
+        gsReceiverString += uint64ToString(usecs, 10);
+        if (i < capture.rawlen - 1) {
+          gsReceiverString += ",";
+        }
+      }
+    }
+
+    // If it isn't an AC code, add the bits.
+    if (!hasACState(capture.decode_type)) {
+      gsReceiverString += "," + String(capture.bits);
+    }
+    
+    irServiceNode.setProperty("received").send(gsReceiverString);
+    debug("Listener Received: " + gsReceiverString);
+  }
 }
