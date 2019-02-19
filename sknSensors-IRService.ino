@@ -36,11 +36,17 @@ extern "C" {
 #define NODE_SENSOR_INTERVAL_MAX_MS 1000
 
 #define FW_NAME "sknSensors-IRService"
-#define FW_VERSION  "0.1.1"
+#define FW_VERSION  "0.1.2"
 
-                               // For an ESP-01 we suggest you use RX/GPIO3/Pin 7 as SEND_PIN
-#define IR_SEND_PIN    D5      // GPIO the IR LED is connected to/controlled by. GPIO 14 = D5.
-#define IR_RECEIVE_PIN D7      // GPIO the IR RX module is connected to/controlled by. GPIO 13 = D7.
+// custom constant current circuit  For an ESP-01 we suggest you use RX/GPIO3/Pin 7 as SEND_PIN
+//#define IR_SEND_PIN    D5      // GPIO the IR LED is connected to/controlled by. GPIO 14 = D5.
+//#define IR_RECEIVE_PIN D7      // GPIO the IR RX module is connected to/controlled by. GPIO 13 = D7.
+
+// A.IR Shield
+#define IR_SEND_PIN    D4      // GPIO2 Index:2 the IR LED is connected to/controlled by
+#define IR_RECEIVE_PIN D5      //  GPIO14 Index:14 the IR RX module is connected to/controlled by
+#define IR_DECODER_PIN D6      //  GPIO12 Index:12
+
  
 String  gsCommandString   = "";   // irProcessCommand() side effect; formatted command string after sending
 String  gsReceiverString  = "";   // irListenerLoop() side effect
