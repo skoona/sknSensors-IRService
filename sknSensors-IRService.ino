@@ -36,7 +36,7 @@ extern "C" {
 #define NODE_SENSOR_INTERVAL_MAX_MS 1000
 
 #define FW_NAME "sknSensors-IRService"
-#define FW_VERSION  "0.1.0"
+#define FW_VERSION  "0.1.1"
 
                                // For an ESP-01 we suggest you use RX/GPIO3/Pin 7 as SEND_PIN
 #define IR_SEND_PIN    D5      // GPIO the IR LED is connected to/controlled by. GPIO 14 = D5.
